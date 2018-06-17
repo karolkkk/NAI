@@ -7,6 +7,7 @@
 
 //#include "PossibleChar.h"
 //dupa
+//biskupa
 
 using namespace cv;
 using namespace std;
