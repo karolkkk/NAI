@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 //#include "PossibleChar.h"
+//dupa
 
 using namespace cv;
 using namespace std;
