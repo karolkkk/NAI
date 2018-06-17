@@ -1,0 +1,436 @@
+#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/ml/ml.hpp>
+#include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
+
+//#include "PossibleChar.h"
+
+using namespace cv;
+using namespace std;
+
+
+const cv::Scalar SCALAR_BLACK = cv::Scalar(0.0, 0.0, 0.0);
+const cv::Scalar SCALAR_WHITE = cv::Scalar(255.0, 255.0, 255.0);
+const cv::Scalar SCALAR_YELLOW = cv::Scalar(0.0, 255.0, 255.0);
+const cv::Scalar SCALAR_GREEN = cv::Scalar(0.0, 255.0, 0.0);
+const cv::Scalar SCALAR_RED = cv::Scalar(0.0, 0.0, 255.0);
+
+const int RESIZED_CHAR_IMAGE_WIDTH = 20;
+const int RESIZED_CHAR_IMAGE_HEIGHT = 30;
+
+Mat src; Mat src_gray; Mat binary_img;
+int thresh = 100;
+int thresh2 = 100;
+int max_thresh = 255;
+RNG rng(12345);
+cv::Ptr<cv::ml::KNearest> kNearest = cv::ml::KNearest::create();
+
+/// Function header
+void thresh_callback(int, void*);
+bool loadKNNDataAndTrainKNN(void);
+
+class comparator {
+public:
+	bool operator()(vector<Point> c1, vector<Point>c2) {
+
+		return boundingRect(Mat(c1)).x<boundingRect(Mat(c2)).x;
+
+	}
+
+};
+
+
+
+void extractContours(Mat& image, vector< vector<Point> > contours_poly) {
+
+
+
+	//Sort contorus by x value going from left to right
+	sort(contours_poly.begin(), contours_poly.end(), comparator());
+
+
+	//Loop through all contours to extract
+	for (int i = 0; i < contours_poly.size(); i++) {
+
+		Rect r = boundingRect(Mat(contours_poly[i]));
+
+
+		Mat mask = Mat::zeros(image.size(), CV_8UC1);
+		//Draw mask onto image
+		drawContours(mask, contours_poly, i, Scalar(255), CV_FILLED);
+
+		//Check for equal sign (2 dashes on top of each other) and merge
+		if (i + 1 < contours_poly.size()) {
+			Rect r2 = boundingRect(Mat(contours_poly[i + 1]));
+			if (abs(r2.x - r.x) < 20) {
+				//Draw mask onto image
+				drawContours(mask, contours_poly, i + 1, Scalar(255), CV_FILLED);
+				i++;
+				int minX = min(r.x, r2.x);
+				int minY = min(r.y, r2.y);
+				int maxX = max(r.x + r.width, r2.x + r2.width);
+				int maxY = max(r.y + r.height, r2.y + r2.height);
+				r = Rect(minX, minY, maxX - minX, maxY - minY);
+
+			}
+		}
+		//Copy 
+		Mat extractPic;
+		//Extract the character using the mask
+		image.copyTo(extractPic, mask);
+		Mat resizedPic = extractPic(r);
+
+		cv::Mat image = resizedPic.clone();
+
+		//Show image
+		imshow("image" + i, image);
+
+
+		//char ch = waitKey(0);
+		stringstream searchMask;
+		searchMask << i << ".jpg";
+		imwrite(searchMask.str(), resizedPic);
+
+	}
+}
+int main(int argc, char** argv)
+{
+
+	bool blnKNNTrainingSuccessful = loadKNNDataAndTrainKNN();           // attempt KNN training
+
+	if (blnKNNTrainingSuccessful == false) {                            // if KNN training was not successful
+																		// show error message
+		cout << endl << endl << "error: error: KNN traning was not successful" << endl << endl;
+		return(0);                                                      // and exit program
+	}
+
+
+
+	/// Load source image and convert it to gray
+	src = imread("2.png", 1);
+
+	
+	/// Convert image to gray and blur it
+	cvtColor(src, src_gray, CV_BGR2GRAY);
+	blur(src_gray, src_gray, Size(3, 3));
+
+
+	thresh_callback(0, 0);
+
+	
+
+
+	//recognizeCharsInPlate(src, std::vector<PossibleChar> &vectorOfMatchingChars)
+
+
+	waitKey(0);
+	return(0);
+}
+
+/** @function thresh_callback */
+void thresh_callback(int, void*)
+{
+	Mat canny_output, imgE, img_sobel, binary_img0;
+	vector<vector<Point> > contours3;
+	vector<Vec4i> hierarchy2;
+
+
+
+	threshold(src_gray, binary_img0, 60, 255, THRESH_BINARY);
+	
+	Mat kernel = (Mat_<uchar>(3, 3) <<
+		1, 1, 1, 1, 1,
+		1, 1, 1, 1);
+
+	erode(binary_img0, imgE, kernel);
+	dilate(imgE, img_sobel, kernel);
+
+
+	/// Detect edges using canny
+	Canny(binary_img0, canny_output, thresh, thresh * 2, 3);
+	/// Find contours
+	findContours(canny_output, contours3, hierarchy2, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
+
+	/// Draw contours
+	Mat drawing = Mat::zeros(canny_output.size(), CV_8UC3);
+	for (int i = 0; i < contours3.size(); i++)
+	{
+		Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
+		drawContours(drawing, contours3, i, color, 2, 8, hierarchy2, 0, Point());
+	}
+
+
+	//vector < vector<Point>> contours;
+	//findContours(invSrc, contours, 0, 2);
+	
+	//vector<Rect> boundRect;
+	vector<vector<Point>> contours_poly2(contours3.size());
+	/*
+	for (int i = 0; i < contours.size(); i++) {
+		if (contours[i].size() > 1 && contours[i].size() < 1000) {
+			approxPolyDP(Mat(contours[i]), contours_poly[i], 3, true);
+			Rect appRect(boundingRect(Mat(contours_poly[i])));
+			if (appRect.width > appRect.height) {
+				boundRect.push_back(appRect);
+			}
+		}
+
+	}
+
+
+	for (int i = 0; i < boundRect.size(); i++)
+		rectangle(src, boundRect[i], Scalar(0, 255, 0), 3, 8, 0);
+	imshow("im1", src);
+	*/
+	
+	bitwise_not(binary_img0, binary_img);
+
+	cv::Mat img2 = binary_img.clone();
+
+
+	std::vector<cv::Point> points;
+	cv::Mat_<uchar>::iterator it = binary_img.begin<uchar>();
+	cv::Mat_<uchar>::iterator end = binary_img.end<uchar>();
+	for (; it != end; ++it)
+		if (*it)
+			points.push_back(it.pos());
+
+	cv::RotatedRect box = cv::minAreaRect(cv::Mat(points));
+
+	double angle = box.angle;
+	if (angle < -45.)
+		angle += 90.;
+
+	cv::Point2f vertices[4];
+	box.points(vertices);
+	for (int i = 0; i < 4; ++i)
+		cv::line(binary_img, vertices[i], vertices[(i + 1) % 4], cv::Scalar(255, 0, 0), 1, CV_AA);
+
+
+
+	cv::Mat rot_mat = cv::getRotationMatrix2D(box.center, angle, 1);
+
+	cv::Mat rotated;
+	cv::warpAffine(img2, rotated, rot_mat, binary_img.size(), cv::INTER_CUBIC);
+
+
+
+	cv::Size box_size = box.size;
+	if (box.angle < -45.)
+		std::swap(box_size.width, box_size.height);
+	cv::Mat cropped;
+
+	cv::getRectSubPix(rotated, box_size, box.center, cropped);
+	cv::imshow("Cropped", cropped);
+	imwrite("example5.jpg", cropped);
+
+	Mat cropped2 = cropped.clone();
+	cvtColor(cropped2, cropped2, CV_GRAY2RGB);
+
+	Mat cropped3 = cropped.clone();
+	cvtColor(cropped3, cropped3, CV_GRAY2RGB);
+
+	vector<vector<Point> > contours;
+	vector<Vec4i> hierarchy;
+
+	/// Find contours
+	cv::findContours(cropped, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_TC89_KCOS, Point(0, 0));
+
+
+
+	/// Approximate contours to polygons + get bounding rects and circles
+	vector<vector<Point> > contours_poly(contours.size());
+	vector<Rect> boundRect(contours.size());
+	vector<Point2f>center(contours.size());
+	vector<float>radius(contours.size());
+
+
+	//Get poly contours
+	for (int i = 0; i < contours.size(); i++)
+	{
+		approxPolyDP(Mat(contours[i]), contours_poly[i], 3, true);
+	}
+
+
+	//Get only important contours, merge contours that are within another
+	vector<vector<Point> > validContours;
+	for (int i = 0; i<contours_poly.size(); i++) {
+
+		Rect r = boundingRect(Mat(contours_poly[i]));
+		if (r.area()<100)continue;
+		bool inside = false;
+		for (int j = 0; j<contours_poly.size(); j++) {
+			if (j == i)continue;
+
+			Rect r2 = boundingRect(Mat(contours_poly[j]));
+			if (r2.area()<100 || r2.area()<r.area())continue;
+			if (r.x>r2.x&&r.x + r.width<r2.x + r2.width&&
+				r.y>r2.y&&r.y + r.height<r2.y + r2.height) {
+
+				inside = true;
+			}
+		}
+		if (inside)continue;
+		validContours.push_back(contours_poly[i]);
+	}
+
+
+	//Get bounding rects
+	for (int i = 0; i<validContours.size(); i++) {
+		boundRect[i] = boundingRect(Mat(validContours[i]));
+	}
+
+
+	//Display
+	Scalar color = Scalar(0, 255, 0);
+	for (int i = 0; i< validContours.size(); i++)
+	{
+		if (boundRect[i].area()<100)continue;
+		drawContours(cropped2, validContours, i, color, 1, 8, vector<Vec4i>(), 0, Point());
+		rectangle(cropped2, boundRect[i].tl(), boundRect[i].br(), color, 2, 8, 0);
+		
+	}
+
+	//imwrite("example6.jpg",cropped2);
+	//imshow("Contours2" , cropped2);
+	//imshow("Contours3", cropped3);
+
+	extractContours(cropped3, validContours);
+
+	
+
+
+		std::string strChars;               // this will be the return value, the chars in the lic plate
+
+		cv::Mat imgThreshColor;
+
+		// sort chars from left to right
+		std::sort(contours_poly.begin(), contours_poly.end(), comparator());
+
+		//cv::cvtColor(cropped3, imgThreshColor, CV_GRAY2BGR);       // make color version of threshold image so we can draw contours in color on it
+		int i = 0;
+		for (auto &currentChar : contours_poly) {        
+			// for each char in plate
+			//cv::rectangle(imgThreshColor, currentChar.boundingRect, SCALAR_GREEN, 2); 
+			
+				
+				stringstream searchMask;
+				searchMask << i << ".jpg";
+				Mat img = imread(searchMask.str());
+				//cv::Mat imgROItoBeCloned = img(contours_poly[i].boundingRect);
+				cv::Mat imgROIResized;
+				cv::resize(img, imgROIResized, cv::Size(RESIZED_CHAR_IMAGE_WIDTH, RESIZED_CHAR_IMAGE_HEIGHT));
+
+				imshow("as", imgROIResized);
+
+				waitKey(1000);
+
+				cv::Mat matROIFloat;
+
+				imgROIResized.convertTo(matROIFloat, CV_32FC1);         // convert Mat to float, necessary for call to findNearest
+
+				cv::Mat matROIFlattenedFloat = matROIFloat.reshape(1, 1);       // flatten Matrix into one row
+
+				cv::Mat matCurrentChar(0, 0, CV_32F);                   // declare Mat to read current char into, this is necessary b/c findNearest requires a Mat
+
+		
+ 				kNearest->findNearest(matROIFlattenedFloat, 1, matCurrentChar);     // finally we can call find_nearest !!!
+
+//				float fltCurrentChar = (float)matCurrentChar.at<float>(0, 0);       // convert current char from Mat to float
+
+//				strChars = strChars + char(int(fltCurrentChar));
+
+//				cout << strChars << endl; 
+
+
+				i++;
+			}
+
+
+}
+
+bool loadKNNDataAndTrainKNN(void) {
+
+	// read in training classifications ///////////////////////////////////////////////////
+
+	cv::Mat matClassificationInts;              // we will read the classification numbers into this variable as though it is a vector
+
+	cv::FileStorage fsClassifications("classifications.xml", cv::FileStorage::READ);        // open the classifications file
+
+	if (fsClassifications.isOpened() == false) {                                                        // if the file was not opened successfully
+		std::cout << "error, unable to open training classifications file, exiting program\n\n";        // show error message
+		return(false);                                                                                  // and exit program
+	}
+
+	fsClassifications["classifications"] >> matClassificationInts;          // read classifications section into Mat classifications variable
+	fsClassifications.release();                                            // close the classifications file
+
+																			// read in training images ////////////////////////////////////////////////////////////
+
+	cv::Mat matTrainingImagesAsFlattenedFloats;         // we will read multiple images into this single image variable as though it is a vector
+
+	cv::FileStorage fsTrainingImages("images.xml", cv::FileStorage::READ);              // open the training images file
+
+	if (fsTrainingImages.isOpened() == false) {                                                 // if the file was not opened successfully
+		std::cout << "error, unable to open training images file, exiting program\n\n";         // show error message
+		return(false);                                                                          // and exit program
+	}
+
+	fsTrainingImages["images"] >> matTrainingImagesAsFlattenedFloats;           // read images section into Mat training images variable
+	fsTrainingImages.release();                                                 // close the traning images file
+
+																				// train //////////////////////////////////////////////////////////////////////////////
+
+																				// finally we get to the call to train, note that both parameters have to be of type Mat (a single Mat)
+																				// even though in reality they are multiple images / numbers
+	kNearest->setDefaultK(1);
+
+	kNearest->train(matTrainingImagesAsFlattenedFloats, cv::ml::ROW_SAMPLE, matClassificationInts);
+
+	return true;
+}
+/*
+std::string recognizeCharsInPlate(cv::Mat &imgThresh, std::vector<PossibleChar> &vectorOfMatchingChars) {
+	std::string strChars;               // this will be the return value, the chars in the lic plate
+
+	cv::Mat imgThreshColor;
+
+	// sort chars from left to right
+	std::sort(vectorOfMatchingChars.begin(), vectorOfMatchingChars.end(), PossibleChar::sortCharsLeftToRight);
+
+	cv::cvtColor(imgThresh, imgThreshColor, CV_GRAY2BGR);       // make color version of threshold image so we can draw contours in color on it
+
+	for (auto &currentChar : vectorOfMatchingChars) {           // for each char in plate
+		cv::rectangle(imgThreshColor, currentChar.boundingRect, SCALAR_GREEN, 2);       // draw green box around the char
+
+		::Mat imgROItoBeCloned = imgThresh(currentChar.boundingRect);                 // get ROI image of bounding rect
+
+		cv::Mat imgROI = imgROItoBeCloned.clone();      // clone ROI image so we don't change original when we resize
+
+		cv::Mat imgROIResized;
+		 resize image, this is necessary for char recognition
+		cv::resize(imgROI, imgROIResized, cv::Size(RESIZED_CHAR_IMAGE_WIDTH, RESIZED_CHAR_IMAGE_HEIGHT));
+
+		cv::Mat matROIFloat;
+
+		imgROIResized.convertTo(matROIFloat, CV_32FC1);         // convert Mat to float, necessary for call to findNearest
+
+		cv::Mat matROIFlattenedFloat = matROIFloat.reshape(1, 1);       // flatten Matrix into one row
+
+		cv::Mat matCurrentChar(0, 0, CV_32F);                   // declare Mat to read current char into, this is necessary b/c findNearest requires a Mat
+
+		kNearest->findNearest(matROIFlattenedFloat, 1, matCurrentChar);     // finally we can call find_nearest !!!
+
+		float fltCurrentChar = (float)matCurrentChar.at<float>(0, 0);       // convert current char from Mat to float
+
+		strChars = strChars + char(int(fltCurrentChar));        // append current char to full string
+	}
+
+
+	return(strChars);               // return result
+}*/
+
+
+
